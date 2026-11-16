@@ -14,7 +14,14 @@ use crate::Visibility;
 
 const TRAY_ID: &str = "main";
 /// Keep in step with THEMES in ui/main.js.
-const THEMES: &[(&str, &str)] = &[("classic", "Classic"), ("glass", "Liquid glass")];
+const THEMES: &[(&str, &str)] = &[
+    ("classic", "Classic"),
+    ("glass", "Liquid glass"),
+    ("signal", "Signal"),
+    ("neon", "Neon"),
+    ("pills", "Pills"),
+    ("terminal", "Terminal"),
+];
 
 fn colour(state: Option<State>) -> [u8; 3] {
     match state {

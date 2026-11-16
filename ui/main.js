@@ -2,7 +2,7 @@
 // as the full list on every change ("sessions-updated"); this file only keeps
 // the DOM in step with it. Looks live in style.css.
 
-const THEMES = ["classic", "glass"]; // keep in step with src-tauri/src/tray.rs
+const THEMES = ["classic", "glass", "signal", "neon", "pills", "terminal"]; // keep in step with src-tauri/src/tray.rs
 const SLOTS = ["error", "needs_you", "working", "done"];
 const STATE_TEXT = { working: "Working", needs_you: "Needs you", done: "Done", error: "Error" };
 

@@ -102,6 +102,11 @@ Tray menu → **Design**. The choice is remembered.
 - **Liquid glass**: a glass capsule per row with four wells
   (red · amber · green · gray); one droplet slides between them, stretching as
   it moves and changing colour on the way.
+- **Signal**: a traffic light on its side, three lenses in a black housing.
+  The lit lens switches instantly; Done is all lenses off.
+- **Neon**: glowing ring, label lit in the state colour, flickers on change.
+- **Pills**: no panel; each session is its own pill washed in its colour.
+- **Terminal**: monospace, block cursor, status word (RUN / WAIT / IDLE / ERR).
 
 Every design shares one DOM, and a design is one `html[data-theme="…"]` block
 in `ui/style.css`. To add one, write the block and add its name to `THEMES` in
