@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "src-tauri"]
+# `cargo test` / `cargo run` at the root only touch the dependency-light core
+# crate; the Tauri app is built with `cargo tauri build` (see README).
+default-members = ["crates/core"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
