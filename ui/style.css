@@ -1,0 +1,184 @@
+/*
+ * One DOM, many designs. Every row is
+ *
+ *   li.row[data-state][data-stale] > span.lamp > i.well ×4 + b.dot
+ *                                  > span.label
+ *
+ * and a design is just a block of CSS under html[data-theme="..."]. The shared
+ * rules below give each row two custom properties to build on:
+ *
+ *   --c     the state colour
+ *   --slot  0 error · 1 needs you · 2 working · 3 done   (lamp position)
+ *
+ * To add a design: add a [data-theme] block here, then list it in THEMES in
+ * main.js and in src-tauri/src/tray.rs.
+ */
+
+:root {
+  --green: #30d158;
+  --amber: #ffb020;
+  --red:   #ff453a;
+  --gray:  #9aa0a6;
+  --margin: 8px;            /* room for the shadow inside the transparent window */
+  --ease-fluid: cubic-bezier(.3, 1.45, .45, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  font: 500 12.5px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}
+
+#panel {
+  list-style: none;
+  width: 220px;
+  margin: var(--margin);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  transition: opacity .4s, filter .4s;
+  animation: row-in .35s ease-out;
+}
+.row[data-state="error"]     { --c: var(--red);   --slot: 0; }
+.row[data-state="needs_you"] { --c: var(--amber); --slot: 1; }
+.row[data-state="working"]   { --c: var(--green); --slot: 2; }
+.row[data-state="done"]      { --c: var(--gray);  --slot: 3; }
+.row[data-stale="true"]      { opacity: .42; filter: saturate(.5); }
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lamp { position: relative; flex: none; display: flex; align-items: center; }
+.well, .dot { display: block; border-radius: 50%; }
+.dot {
+  position: absolute;
+  background-color: var(--c);
+  transition: translate .55s var(--ease-fluid), background-color .45s ease, box-shadow .45s ease;
+}
+/* The "needs you" halo: a ring that breathes out from the dot. */
+.dot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--c);
+  opacity: 0;
+}
+.row[data-state="needs_you"]:not([data-stale="true"]) .dot::before {
+  animation: halo 2.2s ease-out infinite;
+}
+
+@keyframes row-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes halo {
+  0%   { opacity: .75; transform: scale(1); }
+  70%, 100% { opacity: 0; transform: scale(2.3); }
+}
+
+/* ───────────────────────── Classic ─────────────────────────
+   Dark pill, one dot per row that changes colour in place. */
+
+html[data-theme="classic"] #panel {
+  color: #e8eaed;
+  background: rgba(24, 25, 28, .93);
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 13px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .35);
+}
+html[data-theme="classic"] .lamp { width: 10px; height: 10px; }
+html[data-theme="classic"] .well { display: none; }
+html[data-theme="classic"] .dot {
+  inset: 0;
+  box-shadow: 0 0 7px color-mix(in srgb, var(--c) 65%, transparent);
+}
+html[data-theme="classic"] .row[data-state="done"] .dot { box-shadow: none; }
+html[data-theme="classic"] .row.changed .dot { animation: pop .45s ease-out; }
+@keyframes pop { 40% { scale: 1.45; } }
+
+/* ─────────────────────── Liquid glass ───────────────────────
+   Frosted capsule per row with four wells; a single droplet slides
+   between them, stretching as it goes and changing colour on the way. */
+
+html[data-theme="glass"] #panel {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .30), rgba(255, 255, 255, .06) 42%, rgba(255, 255, 255, .14)),
+    rgba(28, 34, 48, .46);
+  border: 1px solid rgba(255, 255, 255, .34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .55),
+    inset 0 -1px 0 rgba(255, 255, 255, .12),
+    inset 0 0 14px rgba(255, 255, 255, .08),
+    0 4px 10px rgba(0, 0, 0, .28);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+}
+html[data-theme="glass"] .lamp {
+  --size: 10px;
+  --step: 14px;
+  gap: calc(var(--step) - var(--size));
+  padding: 3px;
+  border-radius: 99px;
+  background: rgba(0, 0, 0, .26);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .45), 0 1px 0 rgba(255, 255, 255, .28);
+}
+html[data-theme="glass"] .well {
+  width: var(--size);
+  height: var(--size);
+  background: rgba(255, 255, 255, .10);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .35);
+}
+html[data-theme="glass"] .dot {
+  left: 3px;
+  top: 3px;
+  width: var(--size);
+  height: var(--size);
+  translate: calc(var(--slot) * var(--step)) 0;
+  background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, .95), rgba(255, 255, 255, 0) 46%);
+  box-shadow:
+    0 0 9px 1px color-mix(in srgb, var(--c) 80%, transparent),
+    inset 0 -1px 2px rgba(0, 0, 0, .28);
+}
+html[data-theme="glass"] .row[data-state="done"] .dot {
+  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, .28);
+}
+html[data-theme="glass"] .row.changed .dot { animation: squish .55s ease-out; }
+@keyframes squish {
+  30% { scale: 1.7 .72; }
+  68% { scale: .9 1.1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row, .dot, .dot::before { animation: none !important; transition: none !important; }
+  .row[data-state="needs_you"] .dot::before { opacity: .6; transform: scale(1.5); }
+}
+
+/* Browser preview only (ui/index.html opened outside the app). */
+html.demo body {
+  min-height: 100vh;
+  background: linear-gradient(120deg, #1d4e89, #7b2d8e 45%, #f08a4b);
+}
+#demo-bar { position: fixed; left: 8px; bottom: 8px; display: flex; gap: 6px; }
+#demo-bar button { font: inherit; padding: 5px 9px; border-radius: 7px; border: 0; cursor: pointer; }
