@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 pub const STALE_AFTER_MS: u64 = 30 * 60 * 1000;
 /// No event for this long removes the session.
 pub const REMOVE_AFTER_MS: u64 = 6 * 60 * 60 * 1000;
+/// Tools that block until the user responds, so the session is amber while
+/// one is open regardless of whether a PermissionRequest fires for it.
+pub const WAITS_ON_USER: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+/// Bound on tracked open tool calls, so a lost PostToolUse can't grow it forever.
+const MAX_IN_FLIGHT: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +58,13 @@ pub struct Session {
     /// Insertion order, so rows keep their place in the widget.
     #[serde(skip)]
     seq: u64,
+    /// `(tool_use_id, tool_name)` for tools whose PreToolUse was seen but no
+    /// result yet. Oldest first.
+    #[serde(skip)]
+    in_flight: Vec<(String, String)>,
+    /// `tool_use_id`s currently blocked on the user.
+    #[serde(skip)]
+    waiting: Vec<String>,
 }
 
 /// The only fields ever read from a hook payload. Everything else in the body
@@ -65,6 +77,8 @@ pub struct HookEvent {
     pub cwd: Option<String>,
     pub tool_name: Option<String>,
     pub notification_type: Option<String>,
+    /// Opaque ID. Absent on PermissionRequest and on older Claude Code.
+    pub tool_use_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,12 +157,14 @@ impl Store {
 
         let existing = self.sessions.get(id);
         let from = existing.map(|s| s.state);
-        let target = match action {
+        let mut target = match action {
             Action::Start => from.unwrap_or(State::Done),
             Action::Set(s) => s,
             Action::Notification => match ev.notification_type.as_deref() {
                 Some(
-                    "permission_prompt" | "elicitation_dialog" | "elicitation_url_dialog"
+                    "permission_prompt"
+                    | "elicitation_dialog"
+                    | "elicitation_url_dialog"
                     | "agent_needs_input",
                 ) => State::NeedsYou,
                 // idle reminders, auth results, quota notices: not a call for attention.
@@ -165,16 +181,21 @@ impl Store {
 
         let before = existing.cloned();
         let seq = self.next_seq;
-        let s = self.sessions.entry(id.to_owned()).or_insert_with(|| Session {
-            session_id: id.to_owned(),
-            label: label_for("", id),
-            cwd: String::new(),
-            state: State::Done,
-            last_event_at: now,
-            last_tool: None,
-            stale: false,
-            seq,
-        });
+        let s = self
+            .sessions
+            .entry(id.to_owned())
+            .or_insert_with(|| Session {
+                session_id: id.to_owned(),
+                label: label_for("", id),
+                cwd: String::new(),
+                state: State::Done,
+                last_event_at: now,
+                last_tool: None,
+                stale: false,
+                seq,
+                in_flight: Vec::new(),
+                waiting: Vec::new(),
+            });
         if before.is_none() {
             self.next_seq += 1;
         }
@@ -196,6 +217,64 @@ impl Store {
             "UserPromptSubmit" | "Stop" | "StopFailure" => s.last_tool = None,
             _ => {}
         }
+
+        let tool = ev.tool_name.as_deref().unwrap_or("");
+        let tool_use_id = ev.tool_use_id.as_deref().filter(|t| !t.is_empty());
+        match event {
+            "PreToolUse" => {
+                if let Some(tid) = tool_use_id {
+                    s.in_flight.push((tid.to_owned(), tool.to_owned()));
+                    if s.in_flight.len() > MAX_IN_FLIGHT {
+                        // An id dropped here may stay in `waiting`; turn
+                        // boundaries clear it.
+                        s.in_flight.remove(0);
+                    }
+                    if WAITS_ON_USER.contains(&tool) {
+                        s.waiting.push(tid.to_owned());
+                    }
+                }
+            }
+            // PermissionRequest carries no tool_use_id, so pair it with the
+            // latest open call of the same tool that isn't already waiting.
+            "PermissionRequest" => {
+                let hit = s
+                    .in_flight
+                    .iter()
+                    .rev()
+                    .find(|(tid, name)| name == tool && !s.waiting.contains(tid))
+                    .map(|(tid, _)| tid.clone());
+                if let Some(tid) = hit {
+                    s.waiting.push(tid);
+                }
+            }
+            "PostToolUse" | "PostToolUseFailure" | "PermissionDenied" => {
+                if let Some(tid) = tool_use_id {
+                    s.in_flight.retain(|(t, _)| t != tid);
+                    s.waiting.retain(|t| t != tid);
+                }
+            }
+            // Turn boundaries: after Escape no result may ever arrive.
+            "UserPromptSubmit" | "Stop" | "StopFailure" => {
+                s.in_flight.clear();
+                s.waiting.clear();
+            }
+            _ => {}
+        }
+        if matches!(
+            event,
+            "PreToolUse"
+                | "PostToolUse"
+                | "PostToolUseFailure"
+                | "PermissionDenied"
+                | "ElicitationResult"
+        ) {
+            target = if s.waiting.is_empty() {
+                State::Working
+            } else {
+                State::NeedsYou
+            };
+        }
+
         s.state = target;
         s.stale = false;
         s.last_event_at = now;
@@ -267,7 +346,12 @@ mod tests {
     }
 
     fn state(store: &Store, id: &str) -> State {
-        store.list().into_iter().find(|s| s.session_id == id).unwrap().state
+        store
+            .list()
+            .into_iter()
+            .find(|s| s.session_id == id)
+            .unwrap()
+            .state
     }
 
     #[test]
@@ -380,11 +464,132 @@ mod tests {
         assert!(st.list()[0].stale);
         assert_eq!(state(&st, "a"), State::Working); // state itself untouched
 
-        assert!(st.apply(&ev("a", "PreToolUse"), STALE_AFTER_MS + 1).is_some());
+        assert!(st
+            .apply(&ev("a", "PreToolUse"), STALE_AFTER_MS + 1)
+            .is_some());
         assert!(!st.list()[0].stale);
 
         assert!(st.sweep(STALE_AFTER_MS + 1 + REMOVE_AFTER_MS));
         assert!(st.list().is_empty());
+    }
+
+    fn tool(id: &str, name: &str, tool: &str, tid: Option<&str>) -> HookEvent {
+        HookEvent {
+            tool_name: Some(tool.into()),
+            tool_use_id: tid.map(Into::into),
+            ..ev(id, name)
+        }
+    }
+
+    #[test]
+    fn question_goes_amber_without_permission_request() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("q1")), 0);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+        st.apply(&tool("a", "PostToolUse", "AskUserQuestion", Some("q1")), 1);
+        assert_eq!(state(&st, "a"), State::Working);
+    }
+
+    #[test]
+    fn plan_approval_goes_amber() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "ExitPlanMode", Some("p1")), 0);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+        st.apply(&tool("a", "PostToolUse", "ExitPlanMode", Some("p1")), 1);
+        assert_eq!(state(&st, "a"), State::Working);
+    }
+
+    #[test]
+    fn other_tools_dont_clear_open_question() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("q1")), 0);
+        st.apply(&tool("a", "PreToolUse", "Bash", Some("b1")), 1);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+        st.apply(&tool("a", "PostToolUse", "Bash", Some("b1")), 2);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+        st.apply(&tool("a", "PostToolUse", "AskUserQuestion", Some("q1")), 3);
+        assert_eq!(state(&st, "a"), State::Working);
+    }
+
+    #[test]
+    fn parallel_permission_prompts() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "Bash", Some("b1")), 0);
+        st.apply(&tool("a", "PreToolUse", "Bash", Some("b2")), 1);
+        st.apply(&tool("a", "PermissionRequest", "Bash", None), 2);
+        st.apply(&tool("a", "PermissionRequest", "Bash", None), 3);
+        assert_eq!(st.sessions["a"].waiting, ["b2", "b1"]);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+        st.apply(&tool("a", "PostToolUse", "Bash", Some("b1")), 4);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+        st.apply(&tool("a", "PostToolUse", "Bash", Some("b2")), 5);
+        assert_eq!(state(&st, "a"), State::Working);
+    }
+
+    #[test]
+    fn permission_denied_and_failure_clear_waiting() {
+        for end in ["PermissionDenied", "PostToolUseFailure"] {
+            let mut st = Store::new();
+            st.apply(&tool("a", "PreToolUse", "Bash", Some("b1")), 0);
+            st.apply(&tool("a", "PermissionRequest", "Bash", None), 1);
+            assert_eq!(state(&st, "a"), State::NeedsYou);
+            st.apply(&tool("a", end, "Bash", Some("b1")), 2);
+            assert_eq!(state(&st, "a"), State::Working, "{end}");
+        }
+    }
+
+    #[test]
+    fn interrupt_then_new_prompt_clears() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("q1")), 0);
+        st.apply(&ev("a", "UserPromptSubmit"), 1);
+        assert_eq!(state(&st, "a"), State::Working);
+
+        st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("q2")), 2);
+        st.apply(&ev("a", "Stop"), 3);
+        assert_eq!(state(&st, "a"), State::Done);
+        assert!(st.sessions["a"].waiting.is_empty());
+        assert!(st.sessions["a"].in_flight.is_empty());
+    }
+
+    #[test]
+    fn idle_notification_doesnt_clear_waiting() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("q1")), 0);
+        st.apply(&notif("a", Some("idle_prompt")), 1);
+        assert_eq!(state(&st, "a"), State::NeedsYou);
+    }
+
+    #[test]
+    fn in_flight_is_capped() {
+        let mut st = Store::new();
+        for i in 0..100 {
+            let tid = format!("t{i}");
+            st.apply(&tool("a", "PreToolUse", "Bash", Some(&tid)), i);
+        }
+        let f = &st.sessions["a"].in_flight;
+        assert_eq!(f.len(), 64);
+        assert_eq!(f[0].0, "t36");
+    }
+
+    #[test]
+    fn bookkeeping_alone_is_not_a_transition() {
+        let mut st = Store::new();
+        st.apply(&ev("a", "UserPromptSubmit"), 0);
+        assert!(st
+            .apply(&tool("a", "PreToolUse", "Bash", Some("b1")), 1)
+            .is_some());
+        assert!(st
+            .apply(&tool("a", "PreToolUse", "Bash", Some("b2")), 2)
+            .is_none());
+    }
+
+    #[test]
+    fn empty_tool_use_id_counts_as_absent() {
+        let mut st = Store::new();
+        st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("")), 0);
+        assert_eq!(state(&st, "a"), State::Working);
+        assert!(st.sessions["a"].in_flight.is_empty());
     }
 
     #[test]
