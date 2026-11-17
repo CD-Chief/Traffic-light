@@ -146,7 +146,11 @@ mod tests {
         if let Some(t) = token {
             req = req.header(TOKEN_HEADER, t);
         }
-        let res = app.clone().oneshot(req.body(Body::from(body.to_owned())).unwrap()).await.unwrap();
+        let res = app
+            .clone()
+            .oneshot(req.body(Body::from(body.to_owned())).unwrap())
+            .await
+            .unwrap();
         let status = res.status();
         let bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
         (status, String::from_utf8(bytes.to_vec()).unwrap())
@@ -158,7 +162,10 @@ mod tests {
     async fn event_updates_state_and_answers_empty_object() {
         let shared = Shared::new(None, |_, _| {});
         let app = router(shared.clone());
-        assert_eq!(post_event(&app, PROMPT, None).await, (StatusCode::OK, "{}".into()));
+        assert_eq!(
+            post_event(&app, PROMPT, None).await,
+            (StatusCode::OK, "{}".into())
+        );
         let s = shared.sessions();
         assert_eq!((s[0].label.as_str(), s[0].state), ("app", State::Working));
     }
@@ -168,7 +175,10 @@ mod tests {
         let shared = Shared::new(None, |_, _| {});
         let app = router(shared.clone());
         for body in ["", "not json", "[1,2]", r#"{"session_id":7}"#] {
-            assert_eq!(post_event(&app, body, None).await, (StatusCode::OK, "{}".into()));
+            assert_eq!(
+                post_event(&app, body, None).await,
+                (StatusCode::OK, "{}".into())
+            );
         }
         assert!(shared.sessions().is_empty());
     }
@@ -178,16 +188,38 @@ mod tests {
         let shared = Shared::new(Some("hunter2".into()), |_, _| {});
         let app = router(shared.clone());
         assert_eq!(post_event(&app, PROMPT, None).await.0, StatusCode::OK);
-        assert_eq!(post_event(&app, PROMPT, Some("wrong")).await.0, StatusCode::OK);
+        assert_eq!(
+            post_event(&app, PROMPT, Some("wrong")).await.0,
+            StatusCode::OK
+        );
         assert!(shared.sessions().is_empty());
         post_event(&app, PROMPT, Some("hunter2")).await;
         assert_eq!(shared.sessions().len(), 1);
     }
 
     #[tokio::test]
+    async fn question_pre_tool_use_goes_amber_and_drops_tool_input() {
+        let shared = Shared::new(None, |_, _| {});
+        let app = router(shared.clone());
+        let body = r#"{"session_id":"s1","hook_event_name":"PreToolUse","cwd":"/code/app","tool_name":"AskUserQuestion","tool_use_id":"toolu_01ABC","tool_input":{"questions":[{"question":"Which database should we use?","options":["pg","sqlite"]}]}}"#;
+        assert_eq!(
+            post_event(&app, body, None).await,
+            (StatusCode::OK, "{}".into())
+        );
+        let s = shared.sessions();
+        assert_eq!(s[0].state, State::NeedsYou);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("tool_input"));
+        assert!(!json.contains("Which database"));
+    }
+
+    #[tokio::test]
     async fn health() {
         let app = router(Shared::new(None, |_, _| {}));
-        let res = app.oneshot(Request::get("/health").body(Body::empty()).unwrap()).await.unwrap();
+        let res = app
+            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
         let bytes = axum::body::to_bytes(res.into_body(), 16).await.unwrap();
         assert_eq!(&bytes[..], b"ok");
     }
