@@ -61,12 +61,17 @@ through the states, for previewing and working on designs.
 | --- | --- |
 | `SessionStart` | Add session as Done (state kept if the session is already known) |
 | `UserPromptSubmit` | Working |
-| `PreToolUse`, `PostToolUse`, `PostToolUseFailure` | Working |
+| `PreToolUse` | Working; Needs you for `AskUserQuestion` / `ExitPlanMode` |
+| `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` | Working (unless another prompt is still open) |
 | `PermissionRequest` | Needs you |
 | `Notification` | Needs you for `permission_prompt` / elicitation / `agent_needs_input`; ignored otherwise (including `idle_prompt`) |
 | `Stop` | Done |
 | `StopFailure` | Error |
 | `SessionEnd` | Remove |
+
+Amber holds until the waiting tool's own result arrives (matched by
+`tool_use_id`), even when other tools run in the meantime. A new prompt or the
+end of the turn clears it.
 
 Anything else is ignored. A session the widget has never heard of is added on
 its first event, so restarting the widget mid-session is fine. Safety net for
@@ -87,6 +92,10 @@ Checked against the Claude Code hooks reference (Nov 2026):
   approve. Nothing fires at the moment of approval; the light goes green
   again when the approved tool finishes. A long-running approved command
   therefore stays amber until it completes.
+- **`PermissionRequest` has no `tool_use_id`**, so it is matched to the most
+  recent open `PreToolUse` of the same tool that isn't already waiting. With
+  no match (widget started mid-turn) the light still goes amber, but the
+  next tool event of any kind can clear it.
 - **Notifications are told apart by `notification_type`**, so the idle
   reminder never turns a finished session amber. The "Done stays Done" rule
   remains as a fallback for payloads without the field.
@@ -121,7 +130,8 @@ which is rectangular and would need the panel reshaped to suit.
 
 - Bound to `127.0.0.1` only.
 - Hook bodies can contain prompts, paths and commands. Only `session_id`,
-  `hook_event_name`, `cwd`, `tool_name` and `notification_type` are read; the
+  `hook_event_name`, `cwd`, `tool_name`, `tool_use_id` (an opaque ID) and
+  `notification_type` are read; the
   rest is discarded during parsing and nothing is logged or written to disk.
 - `/event` always answers `200 {}`, even for garbage, so the widget is never
   the reason a hook errors.
