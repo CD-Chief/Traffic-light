@@ -96,12 +96,20 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "toggle" => {
                 let vis = app.state::<Visibility>();
                 vis.wanted.fetch_xor(true, Ordering::Relaxed);
-                crate::publish(app, &app.state::<std::sync::Arc<traffic_light_core::Shared>>().sessions());
+                crate::publish(
+                    app,
+                    &app.state::<std::sync::Arc<traffic_light_core::Shared>>()
+                        .sessions(),
+                );
             }
             "autostart" => {
                 let launcher = app.autolaunch();
                 let enabled = launcher.is_enabled().unwrap_or(false);
-                let _ = if enabled { launcher.disable() } else { launcher.enable() };
+                let _ = if enabled {
+                    launcher.disable()
+                } else {
+                    launcher.enable()
+                };
                 let _ = autostart_item.set_checked(launcher.is_enabled().unwrap_or(!enabled));
             }
             "quit" => app.exit(0),
@@ -136,7 +144,9 @@ pub fn enable_autostart_on_first_run(app: &AppHandle) {
     if cfg!(debug_assertions) {
         return;
     }
-    let Ok(dir) = app.path().app_config_dir() else { return };
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
+    };
     let marker = dir.join("autostart-configured");
     if marker.exists() {
         return;

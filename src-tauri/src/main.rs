@@ -40,7 +40,9 @@ fn main() {
         // Must be registered first: a second launch exits here instead of
         // fighting over the port.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            app.state::<Visibility>().wanted.store(true, Ordering::Relaxed);
+            app.state::<Visibility>()
+                .wanted
+                .store(true, Ordering::Relaxed);
             publish(app, &app.state::<Arc<Shared>>().sessions());
         }))
         // Position only: size follows the session count and visibility is ours.

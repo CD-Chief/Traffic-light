@@ -5,5 +5,5 @@
 pub mod server;
 pub mod state;
 
-pub use server::{serve, router, Shared, DEFAULT_PORT, TOKEN_HEADER};
+pub use server::{router, serve, Shared, DEFAULT_PORT, TOKEN_HEADER};
 pub use state::{most_urgent, HookEvent, Session, State, Store, Transition};

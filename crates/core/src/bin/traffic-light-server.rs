@@ -15,7 +15,11 @@ async fn main() {
                 t.label,
                 t.event,
                 name(t.from),
-                if t.to.is_some() { name(t.to) } else { "removed" },
+                if t.to.is_some() {
+                    name(t.to)
+                } else {
+                    "removed"
+                },
                 sessions.len(),
                 if sessions.len() == 1 { "" } else { "s" },
             ),
