@@ -12,6 +12,7 @@ const panel = document.getElementById("panel");
 const limitsEl = document.getElementById("limits");
 const rows = new Map(); // session_id -> <li>
 let sessions = [];
+let limitsVisible = true;
 let limits = null; // { five_hour, seven_day }, each { used_percentage, resets_at (seconds) } or null
 
 function setTheme(name) {
@@ -146,7 +147,6 @@ function render(list) {
 }
 
 const WINDOW_NAMES = { five_hour: "5-hour limit", seven_day: "Weekly limit" };
-const WINDOW_SHORT = { five_hour: "5h", seven_day: "wk" };
 
 function clock(d, withDay) {
   const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -166,15 +166,22 @@ function renderLimits() {
     const expired = resetMs <= Date.now();
     const pct = expired ? 0 : Math.round(Math.min(100, Math.max(0, w.used_percentage)));
     el.dataset.level = pct >= 90 ? "crit" : pct >= 70 ? "warn" : "ok";
-    el.querySelector(".lim-text").textContent = `${WINDOW_SHORT[key]} ${pct}%`;
     el.querySelector(".lim-bar i").style.width = `${pct}%`;
     el.title = expired
       ? `${WINDOW_NAMES[key]}: window has reset`
       : `${WINDOW_NAMES[key]}: ${pct}% used, resets in ${span(resetMs - Date.now())} (${clock(new Date(resetMs), resetMs - Date.now() > 86400000)})`;
   }
   const wasHidden = limitsEl.hidden;
-  limitsEl.hidden = !any;
+  limitsEl.hidden = !any || !limitsVisible;
+  panel.classList.toggle("has-limits", !limitsEl.hidden);
   if (wasHidden !== limitsEl.hidden) fitWindow();
+}
+
+// The tray's "Show plan limits" switch. The UI owns the stored value.
+function setLimitsVisible(v, store = true) {
+  limitsVisible = !!v;
+  if (store) try { localStorage.setItem("limitsVisible", limitsVisible ? "1" : "0"); } catch {}
+  renderLimits();
 }
 
 function setLimits(l) {
@@ -226,6 +233,7 @@ setInterval(() => {
 }, 15000);
 
 try { setTheme(localStorage.getItem("theme") || "classic"); } catch {}
+try { limitsVisible = localStorage.getItem("limitsVisible") !== "0"; } catch {}
 
 if (tauri) {
   // data-tauri-drag-region only fires for clicks on the element itself, not
@@ -254,6 +262,8 @@ if (tauri) {
   tauri.event.listen("sessions-updated", (e) => render(e.payload));
   tauri.event.listen("theme-changed", (e) => setTheme(e.payload));
   tauri.event.listen("limits-updated", (e) => setLimits(e.payload));
+  tauri.event.listen("limits-visible", (e) => setLimitsVisible(e.payload));
+  tauri.core.invoke("sync_limits_visible", { visible: limitsVisible }).catch(() => {});
   tauri.core.invoke("get_sessions").then(render);
   tauri.core.invoke("get_limits").then(setLimits);
 } else {
@@ -264,7 +274,9 @@ if (tauri) {
 // designs can be previewed and worked on without building the app.
 function startDemo() {
   document.documentElement.classList.add("demo");
-  if (new URLSearchParams(location.search).has("fit")) document.documentElement.classList.add("fit");
+  const q = new URLSearchParams(location.search);
+  if (q.get("limits") === "off") setLimitsVisible(false, false);
+  if (q.has("fit")) document.documentElement.classList.add("fit");
   const now = Date.now();
   const mk = (id, label, state, extra = {}) => ({
     session_id: id, label, cwd: `C:\\Users\\you\\code\\${label}`, state,
@@ -281,7 +293,7 @@ function startDemo() {
     five_hour: { used_percentage: 23.4, resets_at: Math.floor(now / 1000) + 130 * 60 },
     seven_day: { used_percentage: 78, resets_at: Math.floor(now / 1000) + 3 * 86400 },
   });
-  const wanted = new URLSearchParams(location.search).get("theme");
+  const wanted = q.get("theme");
   if (wanted) setTheme(wanted);
 
   const bar = document.createElement("div");
@@ -294,7 +306,6 @@ function startDemo() {
   }
   document.body.append(bar);
 
-  const q = new URLSearchParams(location.search);
   const frozen = q.get("sweep");
   if (frozen) {
     const row = list.find((s) => s.state === frozen);

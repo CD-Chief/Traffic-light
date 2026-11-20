@@ -111,12 +111,20 @@ waiting or working session has been in that state. It updates every 15 seconds.
 
 ## Plan limits
 
-The widget footer shows your 5-hour and weekly plan usage (`5h 23%`, `wk 41%`,
-each with a thin bar: amber from 70%, red from 90%), and the tray tooltip adds
-a `Limits:` line. A window whose reset time has passed shows `0%`. The footer
-is hidden until limits are known, which they never are for API-key users:
-Claude Code only reports `rate_limits` to Pro, Max and Ultra subscribers, and
-only after a session's first API response.
+The widget shows your plan usage as a thin 3px strip along the bottom edge of
+the panel (under the last pill in the Pills design). It has two unlabelled
+bars: the left one is the 5-hour window, the right one the weekly window.
+Each fills as you use up the window, neutral until 70%, amber from 70%, red
+from 90%. Hover a bar for details, for example "5-hour limit: 23% used,
+resets in 2 h 10 min (14:30)". A window whose reset time has passed shows as
+empty. The tray tooltip adds a `Limits:` line (always, whatever the switch
+below says).
+
+Turn the strip off with the tray menu item **Show plan limits** (on by
+default). The choice is remembered. The strip is also hidden until limits are
+known, which they never are for API-key users: Claude Code only reports
+`rate_limits` to Pro, Max and Ultra subscribers, and only after a session's
+first API response.
 
 The numbers come from Claude Code's status line, which passes a JSON object to
 your status-line command on stdin. Add the one line from
