@@ -1,6 +1,7 @@
 // No console window behind the widget on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod focus;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,8 +27,15 @@ fn get_limits(shared: tauri::State<'_, Arc<Shared>>) -> Limits {
     shared.limits()
 }
 
+/// Bring the window behind a light to the front. False means nothing found.
+#[tauri::command]
+fn focus_session(window: tauri::WebviewWindow, session_id: String) -> bool {
+    focus::focus(&session_id, Some(&window))
+}
+
 /// Push the current session list to the webview, tray and window visibility.
 pub fn publish(app: &AppHandle, sessions: &[Session]) {
+    focus::retain(sessions);
     let _ = app.emit("sessions-updated", sessions);
     tray::update(app, sessions);
     if let Some(window) = app.get_webview_window("main") {
@@ -63,7 +71,11 @@ fn main() {
         .manage(Visibility {
             wanted: AtomicBool::new(true),
         })
-        .invoke_handler(tauri::generate_handler![get_sessions, get_limits])
+        .invoke_handler(tauri::generate_handler![
+            get_sessions,
+            get_limits,
+            focus_session
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -78,7 +90,11 @@ fn main() {
                 let shared = for_limits.state::<Arc<Shared>>();
                 tray::update(&for_limits, &shared.sessions());
             });
+            shared.set_peer_callback(focus::remember);
             app.manage(shared.clone());
+
+            #[cfg(debug_assertions)]
+            focus::debug_test(handle.clone());
 
             tray::build(&handle)?;
             tray::enable_autostart_on_first_run(&handle);
