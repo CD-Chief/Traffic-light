@@ -25,7 +25,11 @@
   --amber: #ffb020;
   --red:   #ff453a;
   --gray:  #9aa0a6;
-  --margin: 8px;            /* room for the shadow inside the transparent window */
+  --margin: 8px;            /* room for the shadow at the top and sides of the transparent window */
+  /* Room below the widget. Must be at least the largest bottom shadow extent
+     (y-offset + blur: 4px + 10px = 14px for the panel themes), or the window
+     clips the shadow. fitWindow reads this from #widget's margin-bottom. */
+  --margin-bottom: 14px;
   --ease-fluid: cubic-bezier(.3, 1.45, .45, 1);
 }
 
@@ -43,7 +47,7 @@ html, body {
 
 #widget {
   width: 220px;
-  margin: var(--margin);
+  margin: var(--margin) var(--margin) var(--margin-bottom);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -367,6 +371,7 @@ html[data-theme="pills"] #limits {
   box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
 }
 html[data-theme="pills"] #widget { gap: 5px; }
+html[data-theme="pills"] { --margin-bottom: 8px; } /* pill shadow reaches 2px + 6px */
 html[data-theme="pills"] .dot { box-shadow: 0 0 7px color-mix(in srgb, var(--c) 65%, transparent); }
 html[data-theme="pills"] .row.changed .dot { animation: pop .45s ease-out; }
 
@@ -446,3 +451,11 @@ html.demo body {
 }
 #demo-bar { position: fixed; left: 8px; bottom: 8px; display: flex; gap: 6px; }
 #demo-bar button { font: inherit; padding: 5px 9px; border-radius: 7px; border: 0; cursor: pointer; }
+
+/* ?fit: the page is exactly the size fitWindow asks the window for, on a
+   checkerboard, so any clipped shadow shows as a hard edge. */
+html.fit { background: #d0189a; }
+html.fit.demo body {
+  min-height: 0;
+  background: repeating-conic-gradient(#f2f2f2 0 25%, #bdbdbd 0 50%) 0 0 / 16px 16px;
+}

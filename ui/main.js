@@ -182,14 +182,35 @@ function setLimits(l) {
   renderLimits();
 }
 
-// The window is exactly as tall as the widget (plus the shadow margin).
+// The window is exactly as big as the widget plus its margins. The bottom
+// margin is separate because the drop shadow falls downward. Sizes are rounded
+// up: a fractional logical size can truncate on a scaled display and cut a
+// pixel off the shadow.
+function fitSize() {
+  const m = getComputedStyle(widget);
+  const px = (v) => parseFloat(v) || 0;
+  return {
+    width: Math.ceil(widget.offsetWidth + px(m.marginLeft) + px(m.marginRight)),
+    height: Math.max(1, Math.ceil(widget.offsetHeight + px(m.marginTop) + px(m.marginBottom))),
+  };
+}
+
 function fitWindow() {
-  if (!tauri) return;
-  const margin = parseFloat(getComputedStyle(widget).marginTop) || 0;
+  const { width, height } = fitSize();
+  if (!tauri) {
+    // ?fit in the demo: pretend the page is the window, clipping like it.
+    if (document.documentElement.classList.contains("fit")) {
+      for (const el of [document.documentElement, document.body]) {
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+      }
+    }
+    return;
+  }
   const { LogicalSize } = tauri.dpi ?? tauri.window;
   tauri.window
     .getCurrentWindow()
-    .setSize(new LogicalSize(widget.offsetWidth + margin * 2, Math.max(1, widget.offsetHeight + margin * 2)))
+    .setSize(new LogicalSize(width, height))
     .catch(() => {});
 }
 
@@ -243,6 +264,7 @@ if (tauri) {
 // designs can be previewed and worked on without building the app.
 function startDemo() {
   document.documentElement.classList.add("demo");
+  if (new URLSearchParams(location.search).has("fit")) document.documentElement.classList.add("fit");
   const now = Date.now();
   const mk = (id, label, state, extra = {}) => ({
     session_id: id, label, cwd: `C:\\Users\\you\\code\\${label}`, state,
