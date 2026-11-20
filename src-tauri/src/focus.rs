@@ -77,9 +77,12 @@ pub fn retain(sessions: &[Session]) {
 }
 
 /// Raise the window that owns this session. Returns whether one was found.
+/// `label` is the session's folder name: one process often owns several
+/// windows (every VS Code window belongs to the same Code.exe), and the one
+/// whose title names the folder is the right one.
 /// `own` is the widget's window; focusing it first gives us the right to
 /// take the foreground, which a `"focus": false` window otherwise lacks.
-pub fn focus(session_id: &str, own: Option<&tauri::WebviewWindow>) -> bool {
+pub fn focus(session_id: &str, label: &str, own: Option<&tauri::WebviewWindow>) -> bool {
     let chain = match lock().get(session_id) {
         Some(o) => o.chain.clone(),
         None => return false,
@@ -90,7 +93,7 @@ pub fn focus(session_id: &str, own: Option<&tauri::WebviewWindow>) -> bool {
     if let Some(w) = own {
         let _ = w.set_focus();
     }
-    imp::raise(&chain)
+    imp::raise(&chain, label)
 }
 
 #[cfg(debug_assertions)]
@@ -120,7 +123,7 @@ pub fn debug_test(app: tauri::AppHandle) {
                     let _ = w.set_focus();
                     std::thread::sleep(std::time::Duration::from_millis(300));
                 }
-                let ok = focus(&id, None);
+                let ok = focus(&id, "", None);
                 eprintln!("traffic-light: TL_FOCUS_TEST {id} -> {ok}");
                 return;
             }
@@ -238,7 +241,8 @@ mod imp {
 
     struct Search {
         pid: u32,
-        found: Option<(HWND, String)>,
+        /// Candidate windows of `pid`, front to back.
+        found: Vec<(HWND, String)>,
     }
 
     unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
@@ -257,27 +261,41 @@ mod imp {
         }
         let mut text = vec![0u16; len as usize + 1];
         let n = GetWindowTextW(hwnd, &mut text).max(0) as usize;
-        search.found = Some((hwnd, String::from_utf16_lossy(&text[..n])));
-        false.into()
+        search
+            .found
+            .push((hwnd, String::from_utf16_lossy(&text[..n])));
+        true.into()
     }
 
-    fn window_of(pid: u32) -> Option<(HWND, String)> {
-        let mut search = Search { pid, found: None };
+    /// The window of `pid` whose title mentions `label`, else its frontmost.
+    fn window_of(pid: u32, label: &str) -> Option<(HWND, String)> {
+        let mut search = Search {
+            pid,
+            found: Vec::new(),
+        };
         unsafe {
-            // Stopping the enumeration early makes EnumWindows return an
-            // error; that is not a failure here.
             let _ = EnumWindows(Some(visit), LPARAM(&mut search as *mut Search as isize));
         }
-        search.found
+        let label = label.to_lowercase();
+        let pick = (!label.is_empty())
+            .then(|| {
+                search
+                    .found
+                    .iter()
+                    .position(|(_, t)| t.to_lowercase().contains(&label))
+            })
+            .flatten()
+            .unwrap_or(0);
+        (pick < search.found.len()).then(|| search.found.swap_remove(pick))
     }
 
-    pub fn raise(chain: &[(u32, String)]) -> bool {
+    pub fn raise(chain: &[(u32, String)], label: &str) -> bool {
         let own = unsafe { GetCurrentProcessId() };
         for (pid, name) in chain {
             if *pid == own || name.eq_ignore_ascii_case("explorer.exe") {
                 continue;
             }
-            let Some((hwnd, title)) = window_of(*pid) else {
+            let Some((hwnd, title)) = window_of(*pid, label) else {
                 continue;
             };
             #[cfg(debug_assertions)]
@@ -332,7 +350,7 @@ mod imp {
     pub fn ancestry(_: u32, _: usize) -> Vec<(u32, String)> {
         Vec::new()
     }
-    pub fn raise(_: &[(u32, String)]) -> bool {
+    pub fn raise(_: &[(u32, String)], _: &str) -> bool {
         false
     }
 }

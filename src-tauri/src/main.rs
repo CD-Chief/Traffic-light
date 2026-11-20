@@ -29,8 +29,18 @@ fn get_limits(shared: tauri::State<'_, Arc<Shared>>) -> Limits {
 
 /// Bring the window behind a light to the front. False means nothing found.
 #[tauri::command]
-fn focus_session(window: tauri::WebviewWindow, session_id: String) -> bool {
-    focus::focus(&session_id, Some(&window))
+fn focus_session(
+    window: tauri::WebviewWindow,
+    shared: tauri::State<'_, Arc<Shared>>,
+    session_id: String,
+) -> bool {
+    let label = shared
+        .sessions()
+        .into_iter()
+        .find(|s| s.session_id == session_id)
+        .map(|s| s.label)
+        .unwrap_or_default();
+    focus::focus(&session_id, &label, Some(&window))
 }
 
 /// Push the current session list to the webview, tray and window visibility.
