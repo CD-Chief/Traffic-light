@@ -8,7 +8,7 @@ use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBui
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
-use traffic_light_core::{most_urgent, Session, State};
+use traffic_light_core::{most_urgent, Limits, Session, Shared, State, Window};
 
 use crate::Visibility;
 
@@ -54,7 +54,37 @@ fn dot(state: Option<State>) -> Image<'static> {
     Image::new_owned(rgba, SIZE, SIZE)
 }
 
-fn tooltip(sessions: &[Session]) -> String {
+/// `resets_at` is in seconds. A window that has reset reads as 0%.
+fn used(w: Window, now_secs: u64) -> u32 {
+    if w.resets_at <= now_secs {
+        0
+    } else {
+        w.used_percentage.round() as u32
+    }
+}
+
+fn limits_line(limits: &Limits, now_secs: u64) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(w) = limits.five_hour {
+        parts.push(format!("5h {}%", used(w, now_secs)));
+    }
+    if let Some(w) = limits.seven_day {
+        parts.push(format!("week {}%", used(w, now_secs)));
+    }
+    (!parts.is_empty()).then(|| format!("Limits: {}", parts.join(" · ")))
+}
+
+fn tooltip(sessions: &[Session], limits: &Limits) -> String {
+    let mut text = session_summary(sessions);
+    let now = traffic_light_core::server::now_ms() / 1000;
+    if let Some(line) = limits_line(limits, now) {
+        text.push('\n');
+        text.push_str(&line);
+    }
+    text
+}
+
+fn session_summary(sessions: &[Session]) -> String {
     if sessions.is_empty() {
         return "Traffic Light: no Claude Code sessions".into();
     }
@@ -90,7 +120,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let autostart_item = autostart.clone();
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(dot(None))
-        .tooltip(tooltip(&[]))
+        .tooltip(tooltip(&[], &Limits::default()))
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "toggle" => {
@@ -126,7 +156,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 pub fn update(app: &AppHandle, sessions: &[Session]) {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_icon(Some(dot(most_urgent(sessions))));
-        let _ = tray.set_tooltip(Some(tooltip(sessions)));
+        let limits = app
+            .try_state::<std::sync::Arc<Shared>>()
+            .map(|s| s.limits())
+            .unwrap_or_default();
+        let _ = tray.set_tooltip(Some(tooltip(sessions, &limits)));
     }
 }
 

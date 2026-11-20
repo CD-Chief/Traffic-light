@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_window_state::StateFlags;
-use traffic_light_core::{serve, Session, Shared, DEFAULT_PORT};
+use traffic_light_core::{serve, Limits, Session, Shared, DEFAULT_PORT};
 
 /// Set from the tray's "Show widget" toggle. The window is visible only when
 /// the user wants it *and* there is at least one session.
@@ -19,6 +19,11 @@ pub struct Visibility {
 #[tauri::command]
 fn get_sessions(shared: tauri::State<'_, Arc<Shared>>) -> Vec<Session> {
     shared.sessions()
+}
+
+#[tauri::command]
+fn get_limits(shared: tauri::State<'_, Arc<Shared>>) -> Limits {
+    shared.limits()
 }
 
 /// Push the current session list to the webview, tray and window visibility.
@@ -58,7 +63,7 @@ fn main() {
         .manage(Visibility {
             wanted: AtomicBool::new(true),
         })
-        .invoke_handler(tauri::generate_handler![get_sessions])
+        .invoke_handler(tauri::generate_handler![get_sessions, get_limits])
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -67,6 +72,12 @@ fn main() {
                 std::env::var("TRAFFIC_LIGHT_TOKEN").ok(),
                 move |sessions, _transition| publish(&for_events, sessions),
             );
+            let for_limits = handle.clone();
+            shared.set_limits_callback(move |limits| {
+                let _ = for_limits.emit("limits-updated", limits);
+                let shared = for_limits.state::<Arc<Shared>>();
+                tray::update(&for_limits, &shared.sessions());
+            });
             app.manage(shared.clone());
 
             tray::build(&handle)?;
