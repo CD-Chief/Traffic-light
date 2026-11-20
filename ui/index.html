@@ -7,7 +7,13 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <ul id="panel" aria-label="Claude Code sessions"></ul>
+  <div id="widget">
+    <ul id="panel" aria-label="Claude Code sessions"></ul>
+    <div id="limits" hidden aria-label="Plan limits">
+      <div class="lim" data-win="five_hour"><span class="lim-text"></span><span class="lim-bar"><i></i></span></div>
+      <div class="lim" data-win="seven_day"><span class="lim-text"></span><span class="lim-bar"><i></i></span></div>
+    </div>
+  </div>
   <script src="main.js"></script>
 </body>
 </html>

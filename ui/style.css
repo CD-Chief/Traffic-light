@@ -3,6 +3,12 @@
  *
  *   li.row[data-state][data-stale] > span.lamp > i.well ×4 + b.dot
  *                                  > span.label
+ *                                  > span.since   (needs-you rows only)
+ *
+ * and, under the rows, a footer with its own backing so it reads on any
+ * desktop (no theme gives it the panel's background):
+ *
+ *   div#limits > div.lim[data-level="ok|warn|crit"] > span.lim-text + span.lim-bar > i
  *
  * and a design is just a block of CSS under html[data-theme="..."]. The shared
  * rules below give each row two custom properties to build on:
@@ -35,10 +41,18 @@ html, body {
   font: 500 12.5px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
-#panel {
-  list-style: none;
+#widget {
   width: 220px;
   margin: var(--margin);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#panel {
+  list-style: none;
+  width: 100%;
+  margin: 0;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -68,6 +82,59 @@ html, body {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* Elapsed time on a waiting row. Same font as the label, dimmed, never wraps;
+   the label ellipsizes first. */
+.since {
+  flex: none;
+  white-space: nowrap;
+  opacity: .62;
+  font-variant-numeric: tabular-nums;
+}
+.since:empty { display: none; }
+
+/* Plan-limit footer. */
+#limits {
+  --track: rgba(255, 255, 255, .16);
+  --fill: #c4c8cc;
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px 7px;
+  color: #e8eaed;
+  background: rgba(24, 25, 28, .93);
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 10px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .3);
+  font-size: 11px;
+}
+#limits[hidden], .lim[hidden] { display: none; }
+.lim {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lim-text { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lim-bar {
+  display: block;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--track);
+  overflow: hidden;
+}
+.lim-bar i {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--fill);
+  transition: width .5s ease, background-color .3s;
+}
+.lim[data-level="warn"] { --fill: var(--amber); }
+.lim[data-level="crit"] { --fill: var(--red); }
+.lim[data-level="warn"] .lim-text { color: var(--amber); }
+.lim[data-level="crit"] .lim-text { color: var(--red); }
 
 /* Default lamp: a single dot. Designs with wells (glass, signal) override this. */
 .lamp { position: relative; flex: none; display: flex; align-items: center; width: 10px; height: 10px; }
@@ -134,6 +201,22 @@ html[data-theme="glass"] #panel {
   -webkit-backdrop-filter: blur(18px) saturate(1.6);
   backdrop-filter: blur(18px) saturate(1.6);
 }
+html[data-theme="glass"] #limits {
+  --track: rgba(255, 255, 255, .22);
+  --fill: #fff;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .26), rgba(255, 255, 255, .06) 42%, rgba(255, 255, 255, .12)),
+    rgba(28, 34, 48, .55);
+  border-color: rgba(255, 255, 255, .34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 4px 10px rgba(0, 0, 0, .28);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+}
+html[data-theme="glass"] .lim[data-level="warn"] .lim-text,
+html[data-theme="glass"] .lim[data-level="crit"] .lim-text { text-shadow: 0 1px 2px rgba(0, 0, 0, .7); }
 html[data-theme="glass"] .lamp {
   --size: 10px;
   --step: 14px;
@@ -228,11 +311,19 @@ html[data-theme="neon"] #panel {
   border-radius: 12px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, .4);
 }
+html[data-theme="neon"] #limits {
+  background: rgba(9, 9, 16, .92);
+  border-color: rgba(255, 255, 255, .08);
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .4);
+}
+html[data-theme="neon"] .lim-bar i { box-shadow: 0 0 6px var(--fill); }
 html[data-theme="neon"] .label {
   color: color-mix(in srgb, var(--c) 62%, #fff);
   text-shadow: 0 0 9px color-mix(in srgb, var(--c) 75%, transparent);
   transition: color .45s, text-shadow .45s;
 }
+html[data-theme="neon"] .since { color: color-mix(in srgb, var(--c) 62%, #fff); }
 html[data-theme="neon"] .dot {
   background-color: transparent;
   border: 2px solid var(--c);
@@ -260,6 +351,14 @@ html[data-theme="pills"] .row {
   box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
   transition: opacity .4s, filter .4s, background-color .5s, border-color .5s;
 }
+html[data-theme="pills"] #limits {
+  border-radius: 99px;
+  padding: 7px 14px 8px;
+  background: rgb(22, 23, 26);
+  border-color: rgba(255, 255, 255, .18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+}
+html[data-theme="pills"] #widget { gap: 5px; }
 html[data-theme="pills"] .dot { box-shadow: 0 0 7px color-mix(in srgb, var(--c) 65%, transparent); }
 html[data-theme="pills"] .row.changed .dot { animation: pop .45s ease-out; }
 
@@ -274,6 +373,16 @@ html[data-theme="terminal"] #panel {
   border-radius: 4px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, .4);
 }
+html[data-theme="terminal"] #limits {
+  --track: #1d2a1f;
+  --fill: #7fbf86;
+  color: #c9d1c9;
+  background: rgba(10, 13, 10, .95);
+  border: 1px solid #2a3a2c;
+  border-radius: 4px;
+  font: 11px/1 "Cascadia Mono", Consolas, ui-monospace, monospace;
+}
+html[data-theme="terminal"] .lim-bar { border-radius: 0; }
 html[data-theme="terminal"] .row { border-radius: 0; }
 html[data-theme="terminal"] .lamp { width: 7px; height: 12px; }
 html[data-theme="terminal"] .dot { border-radius: 0; transition: none; }
