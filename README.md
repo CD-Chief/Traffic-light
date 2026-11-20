@@ -134,6 +134,19 @@ It runs in the background and never delays the status line. If you set
 to that curl command. No polling is involved: the status line already runs on
 every assistant message.
 
+## Click to jump
+
+Click a light (a press that moves less than 4 px; anything more drags the
+widget) to bring that session's window to the front. It raises the *window*:
+for Windows Terminal that is the whole window, not the specific tab, and for
+VS Code it is the VS Code window, not the terminal panel. If no window is found
+the row shakes. Windows only; elsewhere the click does nothing.
+
+No hook configuration is involved. When an event arrives, the widget looks up
+which process owns the client end of that localhost connection, remembers it
+and its parent processes, and on click raises the nearest one that owns a
+visible window.
+
 ## Designs
 
 Tray menu → **Design**. The choice is remembered.
@@ -164,6 +177,10 @@ which is rectangular and would need the panel reshaped to suit.
   `hook_event_name`, `cwd`, `tool_name`, `tool_use_id` (an opaque ID) and
   `notification_type` are read; the
   rest is discarded during parsing and nothing is logged or written to disk.
+- For click to jump, the widget keeps each session's sender process ID and the
+  names of its parent processes (for example `claude.exe`, `Code.exe`). They
+  are looked up from the local connection table, held in memory only, never
+  logged in release builds, and dropped when the session disappears.
 - `/event` always answers `200 {}`, even for garbage, so the widget is never
   the reason a hook errors.
 - `POST /status` (plan limits) reads only `rate_limits.five_hour` and
