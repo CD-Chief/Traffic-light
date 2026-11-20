@@ -4,7 +4,9 @@
 use std::sync::atomic::Ordering;
 
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{
+    CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder,
+};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
@@ -13,6 +15,9 @@ use traffic_light_core::{most_urgent, Limits, Session, Shared, State, Window};
 use crate::Visibility;
 
 const TRAY_ID: &str = "main";
+
+/// The "Show plan limits" check item, kept so the UI can sync it on load.
+pub struct LimitsItem(pub CheckMenuItem<tauri::Wry>);
 /// Keep in step with THEMES in ui/main.js.
 const THEMES: &[(&str, &str)] = &[
     ("classic", "Classic"),
@@ -108,10 +113,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let autostart = CheckMenuItemBuilder::with_id("autostart", "Start on login")
         .checked(app.autolaunch().is_enabled().unwrap_or(false))
         .build(app)?;
+    let limits_item = CheckMenuItemBuilder::with_id("limits_visible", "Show plan limits")
+        .checked(true)
+        .build(app)?;
+    app.manage(LimitsItem(limits_item.clone()));
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&toggle)
         .item(&design)
+        .item(&limits_item)
         .item(&autostart)
         .separator()
         .item(&quit)
@@ -141,6 +151,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     launcher.enable()
                 };
                 let _ = autostart_item.set_checked(launcher.is_enabled().unwrap_or(!enabled));
+            }
+            "limits_visible" => {
+                // The menu flips the check itself before this fires.
+                let visible = limits_item.is_checked().unwrap_or(true);
+                let _ = app.emit("limits-visible", visible);
             }
             "quit" => app.exit(0),
             id => {

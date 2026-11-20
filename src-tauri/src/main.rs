@@ -27,6 +27,12 @@ fn get_limits(shared: tauri::State<'_, Arc<Shared>>) -> Limits {
     shared.limits()
 }
 
+/// The UI owns the stored choice; this makes the tray check match it.
+#[tauri::command]
+fn sync_limits_visible(item: tauri::State<'_, tray::LimitsItem>, visible: bool) {
+    let _ = item.0.set_checked(visible);
+}
+
 /// Bring the window behind a light to the front. False means nothing found.
 #[tauri::command]
 fn focus_session(
@@ -84,6 +90,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_sessions,
             get_limits,
+            sync_limits_visible,
             focus_session
         ])
         .setup(|app| {
