@@ -54,9 +54,62 @@ impl Limits {
                 } else {
                     0.0
                 };
-                *slot = Some(w);
+                *slot = Some(merge(*slot, w));
             }
         }
         *self != before
+    }
+}
+
+/// Two `resets_at` values this close are the same window.
+const SAME_WINDOW_SECS: u64 = 60;
+
+/// Every session's status line reports the account's limits as of that
+/// session's own last reply, so an idle session can send numbers older than
+/// what we already have. A later `resets_at` is a new window; within one
+/// window usage only grows; an earlier window is stale.
+fn merge(old: Option<Window>, new: Window) -> Window {
+    match old {
+        Some(o) if new.resets_at + SAME_WINDOW_SECS < o.resets_at => o,
+        Some(o) if new.resets_at <= o.resets_at + SAME_WINDOW_SECS => Window {
+            used_percentage: o.used_percentage.max(new.used_percentage),
+            resets_at: o.resets_at.max(new.resets_at),
+        },
+        _ => new,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(five: f64, five_reset: u64) -> StatusPayload {
+        serde_json::from_str(&format!(
+            r#"{{"rate_limits":{{"five_hour":{{"used_percentage":{five},"resets_at":{five_reset}}}}}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn idle_session_cannot_roll_numbers_back() {
+        let mut l = Limits::default();
+        assert!(l.update(&payload(45.0, 10_000)));
+        // Same window, lower number from a session that replied earlier.
+        assert!(!l.update(&payload(20.0, 10_000)));
+        assert_eq!(l.five_hour.unwrap().used_percentage, 45.0);
+        // A report from the previous window is ignored outright.
+        assert!(!l.update(&payload(90.0, 2_000)));
+        assert_eq!(l.five_hour.unwrap().resets_at, 10_000);
+    }
+
+    #[test]
+    fn new_window_replaces_old_and_same_window_grows() {
+        let mut l = Limits::default();
+        l.update(&payload(45.0, 10_000));
+        assert!(l.update(&payload(50.0, 10_030))); // within tolerance: same window
+        assert_eq!(l.five_hour.unwrap().used_percentage, 50.0);
+        assert!(l.update(&payload(3.0, 28_000))); // window rolled over
+        assert_eq!(l.five_hour.unwrap().used_percentage, 3.0);
+        assert_eq!(l.five_hour.unwrap().resets_at, 28_000);
     }
 }
