@@ -255,3 +255,39 @@ Owner request (2026-11-20): when a state changes, a glow briefly travels along t
 - A screenshot with no `sweep` param shows no ring.
 
 **[owner] steps:** watch it live and say if it's too subtle or too much.
+
+### Card 6: Minimal limit bars, with an off switch
+
+Owner feedback (2026-11-20) on Card 3's footer: the bars need no labels; they should sit minimally and flush under the rest of the info; and there must be an option to turn them off.
+
+**What to build**
+
+1. **Restyle** (`ui/style.css`, `ui/main.js`, `ui/index.html`):
+   - Remove the separate footer box and the visible `5h 23%` / `wk 41%` text.
+   - The limits become one thin strip, 3px tall, sitting flush along the **bottom inside edge of `#panel`**. It is part of the panel, with no gap, no own background box, no extra padding above it beyond what the panel already has.
+   - It holds two bars side by side with a 4px gap: **left = 5-hour, right = weekly**. Each is a faint track with the used part filled.
+   - Fill colours keep the levels: below 70 neutral (the theme's dim foreground), 70 to 89 amber, 90 and over red.
+   - The strip's ends must follow the panel's rounded corners or be inset so they don't poke out. Pick whichever looks cleaner and say which.
+   - **pills**, which has no panel box: the strip sits directly under the last pill, the same width as the pills, with the same 3px gap the pills have between them, and no backing.
+   - Hovering a bar keeps the existing detailed tooltip, e.g. "5-hour limit: 23% used, resets in 2 h 10 min (14:30)". Make each bar's hover target at least 8px tall with an invisible hit area, so the tooltip is reachable.
+   - Hidden entirely when no limits are known, or when the switch is off. Hidden means it takes no space, and `fitWindow` follows.
+   - The Card 5 sweep ring on `#panel` must still sit on the border, above or around the strip, without breaking it.
+2. **Off switch.** It's a tray menu check item, **"Show plan limits"**, placed after "Design", default **on**.
+   - The UI owns persistence: localStorage key `limitsVisible`, wrapped in try/catch like `theme`.
+   - On load, the UI calls a new command `sync_limits_visible(visible: bool)` so Rust can set the check item to match.
+   - Clicking the item flips the check and emits `limits-visible` with the new bool. The UI applies it and stores it.
+   - Keep the `CheckMenuItem` handle in Tauri managed state, or another simple holder, so the command can update it. Follow the existing autostart item pattern in `tray.rs`.
+   - The tray **tooltip** keeps showing the `Limits:` line regardless of the switch. It's out of the way.
+3. **Demo:** limits still show in the demo. `?limits=off` hides them, for a screenshot.
+4. **README:** update the "Plan limits" section (unlabelled bars, hover for details, left 5-hour and right weekly, the tray switch).
+
+**Decisions already made**
+- No labels, ever, on the strip itself.
+- Persistence in localStorage, not a Rust settings file.
+
+**Done when**
+- `cargo build -p traffic-light; echo EXIT=$?` gives EXIT=0. `cargo test -p traffic-light-core; echo EXIT=$?` gives EXIT=0. `cargo fmt --all -- --check; echo EXIT=$?` gives EXIT=0.
+- Headless-Chrome screenshots, same command as before, with `?static&theme=<t>` for all 6 themes, plus `?static&theme=classic&limits=off`, plus `?static&theme=classic&sweep=needs_you&at=0.35`. Save them to `C:\Users\chief\AppData\Local\Temp\claude\e7cf42f457511299\c37d3613-5d25-48da-b9b1-2f8348212f47\scratchpad\shots\bars\`.
+- Look at every one: the strip is flush at the panel's bottom, unlabelled and tidy at the corners, and the `limits=off` shot has no strip and no leftover space.
+
+**[owner] steps:** none.
