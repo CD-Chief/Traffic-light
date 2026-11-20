@@ -407,7 +407,34 @@ html[data-theme="terminal"] .row[data-state="done"]::after      { content: "IDLE
 html[data-theme="terminal"] .row[data-state="error"]::after     { content: "ERR"; }
 @keyframes blink { to { opacity: .15; } }
 
+/* Border sweep on a state change. The ring sits on the 1px border and is cut
+   to a hollow shape by the mask; the band slides top-left to bottom-right. */
+#panel, html[data-theme="pills"] .row { position: relative; }
+#panel.sweeping::after, html[data-theme="pills"] .row.sweeping::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1.5px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg, transparent 33%, var(--sweep) 50%, transparent 67%) 100% 100% / 200% 200% no-repeat;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  filter: drop-shadow(0 0 3px var(--sweep));
+  animation: border-sweep .9s ease-out var(--sweep-delay, 0s) both;
+  animation-play-state: var(--sweep-play, running);
+}
+@keyframes border-sweep {
+  0%   { background-position: 100% 100%; opacity: 0; }
+  10%  { opacity: 1; }
+  75%  { opacity: 1; }
+  100% { background-position: 0 0; opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  #panel.sweeping::after, .row.sweeping::after { display: none; }
   .row, .dot, .dot::before, .label { animation: none !important; transition: none !important; }
   .row[data-state="needs_you"] .dot::before { opacity: .6; transform: scale(1.5); }
 }

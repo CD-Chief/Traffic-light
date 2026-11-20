@@ -91,6 +91,23 @@ function createRow() {
   return li;
 }
 
+// A glow runs once around the border in the row's new colour. Pills have no
+// panel border, so there it runs on the row's own pill.
+function sweep(row, colour, frozenAt) {
+  const el = document.documentElement.dataset.theme === "pills" ? row : panel;
+  el.style.setProperty("--sweep", colour || getComputedStyle(row).getPropertyValue("--c"));
+  if (frozenAt === undefined) {
+    el.style.removeProperty("--sweep-delay");
+    el.style.removeProperty("--sweep-play");
+  } else {
+    el.style.setProperty("--sweep-delay", `${-frozenAt * 0.9}s`);
+    el.style.setProperty("--sweep-play", "paused");
+  }
+  el.classList.remove("sweeping");
+  void el.offsetWidth; // restart the animation
+  el.classList.add("sweeping");
+}
+
 // Rows are reused, never rebuilt, so the dot can animate from its old
 // position and colour to the new one.
 function render(list) {
@@ -108,6 +125,8 @@ function render(list) {
         li.classList.remove("changed");
         void li.offsetWidth; // restart the move animation
         li.classList.add("changed");
+        li.dataset.state = s.state;
+        sweep(li);
       }
       li.dataset.state = s.state;
     }
@@ -253,7 +272,17 @@ function startDemo() {
   }
   document.body.append(bar);
 
-  if (new URLSearchParams(location.search).has("static")) return;
+  const q = new URLSearchParams(location.search);
+  const frozen = q.get("sweep");
+  if (frozen) {
+    const row = list.find((s) => s.state === frozen);
+    const colour = { error: "var(--red)", needs_you: "var(--amber)", working: "var(--green)", done: "var(--gray)" }[frozen];
+    if (row && colour) {
+      const at = Math.min(1, Math.max(0, parseFloat(q.get("at")) || 0));
+      sweep(rows.get(row.session_id), colour, at);
+    }
+  }
+  if (q.has("static")) return;
   const cycle = ["working", "needs_you", "working", "done", "working", "error"];
   let tick = 0;
   setInterval(() => {
