@@ -81,6 +81,8 @@ html, body {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /* The body font is line-height 1; with overflow hidden that clips descenders. */
+  line-height: 1.4;
 }
 
 /* Elapsed time on a waiting row. Same font as the label, dimmed, never wraps;
