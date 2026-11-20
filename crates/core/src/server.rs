@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{DefaultBodyLimit, State as AxumState};
-use axum::http::HeaderMap;
+use axum::extract::{ConnectInfo, DefaultBodyLimit, State as AxumState};
+use axum::http::{Extensions, HeaderMap};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
@@ -24,6 +24,7 @@ const SWEEP_EVERY: Duration = Duration::from_secs(60);
 
 type OnChange = dyn Fn(&[Session], Option<&Transition>) + Send + Sync;
 type OnLimits = dyn Fn(&Limits) + Send + Sync;
+type OnPeer = dyn Fn(&str, SocketAddr) + Send + Sync;
 
 /// State shared between the HTTP handlers, the stale-session sweeper and
 /// whoever renders the lights.
@@ -33,6 +34,7 @@ pub struct Shared {
     on_change: Box<OnChange>,
     limits: Mutex<Limits>,
     on_limits: OnceLock<Box<OnLimits>>,
+    on_peer: OnceLock<Box<OnPeer>>,
 }
 
 impl Shared {
@@ -48,6 +50,7 @@ impl Shared {
             on_change: Box::new(on_change),
             limits: Mutex::new(Limits::default()),
             on_limits: OnceLock::new(),
+            on_peer: OnceLock::new(),
         })
     }
 
@@ -55,6 +58,14 @@ impl Shared {
     /// them. Set once, before the server starts; later calls are ignored.
     pub fn set_limits_callback(&self, f: impl Fn(&Limits) + Send + Sync + 'static) {
         let _ = self.on_limits.set(Box::new(f));
+    }
+
+    /// Called with the session id and the sender's socket address for every
+    /// authorised event that names a session, before the state is updated.
+    /// It runs on the server task and the connection is still open, so keep it
+    /// quick. Set once, before the server starts; later calls are ignored.
+    pub fn set_peer_callback(&self, f: impl Fn(&str, SocketAddr) + Send + Sync + 'static) {
+        let _ = self.on_peer.set(Box::new(f));
     }
 
     pub fn limits(&self) -> Limits {
@@ -135,6 +146,7 @@ pub fn router(shared: Arc<Shared>) -> Router {
 async fn event(
     AxumState(shared): AxumState<Arc<Shared>>,
     headers: HeaderMap,
+    extensions: Extensions,
     body: Result<Bytes, BytesRejection>,
 ) -> Json<Value> {
     if shared.authorised(&headers) {
@@ -142,6 +154,15 @@ async fn event(
             // The body is parsed straight into the handful of fields we keep
             // and then dropped. It is never logged or stored.
             if let Ok(ev) = serde_json::from_slice::<HookEvent>(&body) {
+                // Read from the extensions rather than extracting ConnectInfo
+                // directly: the in-process test router has none.
+                if let (Some(cb), Some(id), Some(ConnectInfo(peer))) = (
+                    shared.on_peer.get(),
+                    ev.session_id.as_deref(),
+                    extensions.get::<ConnectInfo<SocketAddr>>(),
+                ) {
+                    cb(id, *peer);
+                }
                 shared.handle(&ev);
             }
         }
@@ -180,7 +201,11 @@ pub async fn serve(port: u16, shared: Arc<Shared>) -> std::io::Result<()> {
         }
     });
 
-    axum::serve(listener, router(shared)).await
+    axum::serve(
+        listener,
+        router(shared).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -219,6 +244,43 @@ mod tests {
         );
         let s = shared.sessions();
         assert_eq!((s[0].label.as_str(), s[0].state), ("app", State::Working));
+    }
+
+    #[tokio::test]
+    async fn events_work_without_connect_info_and_skip_the_peer_callback() {
+        let shared = Shared::new(None, |_, _| {});
+        let calls = Arc::new(Mutex::new(0));
+        let calls2 = calls.clone();
+        shared.set_peer_callback(move |_, _| *calls2.lock().unwrap() += 1);
+        let app = router(shared.clone());
+        assert_eq!(
+            post_event(&app, PROMPT, None).await,
+            (StatusCode::OK, "{}".into())
+        );
+        assert_eq!(shared.sessions().len(), 1);
+        assert_eq!(*calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn peer_callback_gets_session_and_address_when_connect_info_exists() {
+        let shared = Shared::new(None, |_, _| {});
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        shared.set_peer_callback(move |id, addr| seen2.lock().unwrap().push((id.to_owned(), addr)));
+        let app = router(shared.clone());
+        let addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+        let mut req = Request::post("/event")
+            .body(Body::from(PROMPT.to_owned()))
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(addr));
+        app.clone().oneshot(req).await.unwrap();
+        // Unauthorised or session-less events do not reach it.
+        let mut req = Request::post("/event")
+            .body(Body::from(r#"{"hook_event_name":"Stop"}"#))
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(addr));
+        app.oneshot(req).await.unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![("s1".to_owned(), addr)]);
     }
 
     #[tokio::test]
