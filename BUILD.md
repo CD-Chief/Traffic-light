@@ -82,3 +82,143 @@ Per the hooks reference: `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `
 - `cargo fmt --all -- --check; echo EXIT=$?` prints EXIT=0
 
 **[owner] steps**: none. The reviewer rebuilds and reinstalls the widget after review.
+
+---
+
+## Stage 2: Waiting timer, plan limits, click to jump
+
+Owner picked these on 2026-11-20. Three cards. Cards 2 and 3 share the UI files and are built by one builder. Card 4 is built afterwards.
+
+### Card 2: How long a session has been waiting
+
+**What to build**
+
+1. `Session` gains `pub state_since: u64` (ms since epoch, **serialized**). It is set when the session is created and whenever `state` actually changes value, and left alone otherwise. `stale` changes don't touch it. `last_event_at` keeps its current meaning.
+2. UI (`ui/main.js`, `ui/style.css`):
+   - Rows in `needs_you` show a small elapsed time after the label, in a new `<span class="since">`: nothing under 1 min, then `1m`, `12m`, `1h 5m`.
+   - Rows in other states show nothing there.
+   - It updates every 15 s; the existing 30 s timer refreshes tooltips, so fold both into one 15 s timer.
+   - Tooltip gains "Waiting for 3 min" for `needs_you` and "Working for 3 min" for `working` (from `state_since`).
+3. The span must look right in all 6 themes: same font as the label, dimmed, never wrapping. The label keeps ellipsizing first.
+
+**Done when**
+- State tests: `state_since` is unchanged by events that keep the state (e.g. two PreToolUse in a row), moves on a real change, and doesn't move when a stale session revives in the same state.
+- The demo (`ui/index.html` in a browser, see Card 3 for screenshots) shows a needs_you row with a timer.
+
+### Card 3: 5-hour and weekly plan limits
+
+Claude Code passes a JSON object to the status-line command on stdin. Verified against https://code.claude.com/docs/en/statusline on 2026-11-20, it includes:
+
+```
+"rate_limits": {
+  "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+  "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 },
+  ...
+}
+```
+
+- `used_percentage` runs from 0 to 100.
+- `resets_at` is in Unix epoch **seconds**.
+- `rate_limits` is present only for Pro, Max and Ultra subscribers, and only after the session's first API response. Either window may be missing.
+- The command runs on new assistant messages, at session start, after `/compact`, on permission-mode change, and when a window's `resets_at` passes.
+
+The owner's status-line script (`~/.claude/statusline-command.sh`, Git Bash) will forward that JSON to the widget with one backgrounded curl line. The reviewer installs that line; your job is the receiving side plus the snippet in the repo.
+
+**What to build**
+
+1. **Core** (`crates/core`): a new route, `POST /status`.
+   - It has the same token check and the same "always `200 {}`" rule as `/event`.
+   - It deserializes **only** `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage: f64`, `resets_at: u64`). Everything else in the body (cwd, transcript_path, model, cost and so on) is dropped by serde, exactly like `HookEvent`.
+   - Bad or empty bodies are ignored.
+   - Stored as a public `Limits { five_hour: Option<Window>, seven_day: Option<Window> }` with `Window { used_percentage: f64, resets_at: u64 }`, Serialize. The **latest** payload that has `rate_limits` wins, per window: a payload with only `five_hour` keeps the old `seven_day`. Clamp `used_percentage` to 0..=100.
+   - The limits are account-wide, not per session.
+   - `Shared` exposes `limits() -> Limits`, plus a way to be told when they change. Your choice of API, but keep it small and don't break `Shared::new`'s existing callers or tests (for example an optional second callback set with a builder method before the server starts).
+2. **App** (`src-tauri`):
+   - A `get_limits` command and a `limits-updated` event.
+   - The tray tooltip appends a line like `Limits: 5h 23% · week 41%` when known.
+3. **UI**:
+   - A slim footer under the session rows (`<div id="limits">`, outside `#panel` or inside it, whichever keeps `fitWindow` correct). It shows the two windows as `5h 23%` and `wk 41%`, each with a thin bar.
+   - Colour by level: below 70 neutral, 70 to 89 amber, 90 and over red. Use the existing state colour variables if the themes have them.
+   - Tooltip: "5-hour limit: 23% used, resets in 2 h 10 min (14:30)", same for the week.
+   - A window whose `resets_at` has passed shows as `0%`, because the window has reset. Re-evaluate on the 15 s timer.
+   - Hidden entirely when no limits are known (API-key users).
+   - Must look acceptable in all 6 themes, and `fitWindow` must include it.
+4. **Repo snippet:**
+   - `hooks/statusline-forward.sh`, a one-line comment plus the line the reviewer will paste into the owner's script right after `input=$(cat)`:
+     `printf '%s' "$input" | curl -s -m 1 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:7890/status >/dev/null 2>&1 &`
+   - README section "Plan limits", explaining how to add it and noting the token header variant.
+5. **Demo mode** (browser, no Tauri):
+   - Fake limits (5h 23%, wk 78%) and a needs_you row whose `state_since` is 4 minutes ago.
+   - `?theme=<name>` picks the theme, so screenshots can be scripted.
+6. **README:** privacy list says `/status` reads only the two `rate_limits` windows.
+
+**Decisions already made**
+- The footer goes in the widget, and the tray tooltip shows the same numbers.
+- No polling, no refreshInterval: the status line already fires on every assistant message.
+- Do not read `transcript_path` or anything else from the status JSON.
+
+**Done when** (Cards 2 and 3 together)
+- Core tests:
+  - `/status` with a realistic full status JSON (including `cwd`, `transcript_path`, `cost`, `model`) stores both windows, and `serde_json::to_string(&limits())` contains none of those other fields.
+  - A partial payload keeps the other window.
+  - A payload without `rate_limits` leaves the limits unchanged.
+  - Garbage gets `200 {}`.
+  - A wrong token is ignored.
+  - The clamp is applied.
+- `cargo test -p traffic-light-core; echo EXIT=$?` gives EXIT=0. `cargo build -p traffic-light; echo EXIT=$?` gives EXIT=0. `cargo fmt --all -- --check; echo EXIT=$?` gives EXIT=0.
+- Screenshots of the demo for all 6 themes with `?static&theme=<name>`, using headless Chrome:
+  `"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-device-scale-factor=2 --window-size=300,260 --screenshot=<scratch>/<theme>.png "file:///C:/Users/chief/SWProjects/Traffic-light/ui/index.html?static&theme=<theme>"`
+  Look at every one yourself. The timer and footer must be legible and not overlap or clip in any theme. Save them outside the repo and list their paths in your report.
+
+**[owner] steps:** none. The reviewer adds the forwarding line to the owner's status-line script (with a backup) and reinstalls the widget.
+
+### Card 4: Click a light to jump to its session's window
+
+Windows only (`#[cfg(windows)]`). On other platforms the click does nothing and everything compiles.
+
+**Approach (decided):** no hook config change. When a hook event arrives, the widget works out which process sent it from the TCP connection itself, and remembers that process and its ancestors. On click it brings the nearest ancestor that owns a visible window to the front.
+
+**What to build**
+
+1. **Core:** the `/event` handler gets the peer `SocketAddr`, via axum `ConnectInfo`, and `serve` switches to `into_make_service_with_connect_info::<SocketAddr>()`.
+   - Missing ConnectInfo (the in-process router tests) must work; skip the callback then.
+   - `Shared` gets an optional "peer seen" callback `Fn(&str /*session_id*/, SocketAddr)`, called for authorised events that have a session_id. Same API style you used for limits.
+   - Core does no Win32 work.
+2. **App** (`src-tauri/src/focus.rs`):
+   - `remember(session_id, peer)`: if this session has no origin yet, find the PID that owns the client end of the connection. Use `GetExtendedTcpTable` (IPv4, `TCP_TABLE_OWNER_PID_CONNECTIONS`): the row whose **local** addr:port equals the peer addr:port is the client, and its `owningPid` is the sender. Then record the PID chain: that PID and up to 12 ancestors, via a `CreateToolhelp32Snapshot` parent lookup, stopping at PID 0/4 or a cycle. Store `session_id -> Vec<(pid, exe_name)>` in a `Mutex<HashMap>`.
+     - Skip the lookup when an origin is already known.
+     - Do this off the async server thread (`spawn_blocking`), since it's cheap but blocking.
+     - Retry on later events if a lookup failed, up to 5 tries per session.
+     - The connection is still open while the handler runs, so the table row exists.
+     - Prune entries for sessions that no longer exist whenever the session list is published.
+   - `focus(session_id) -> bool` (tauri command `focus_session`):
+     - Walk the stored chain from the sender upward. For each pid, find a top-level window that is visible, not owned (`GetWindow(GW_OWNER)` is null), and has a non-empty title, via `EnumWindows` plus `GetWindowThreadProcessId`.
+     - Skip `explorer.exe`, and our own process.
+     - First hit: if minimised (`IsIconic`), `ShowWindow(SW_RESTORE)`, then bring it to the front.
+     - The widget window is `"focus": false`, so Windows may refuse `SetForegroundWindow`. Call the Tauri window's `set_focus()` first, then `SetForegroundWindow`. If it still fails, use the `AttachThreadInput` to the current foreground thread fallback. Report which path worked in your notes.
+     - Return true if a window was found.
+   - Dependency: the `windows` crate (a current 0.6x version), with only the features needed, under `[target.'cfg(windows)'.dependencies]`.
+3. **UI** (`ui/main.js`):
+   - Replace "drag on mousedown" with: on mousedown (button 0), remember the point. If the mouse moves more than 4 px with the button held, `startDragging()`. On mouseup without a drag, if the target is inside a `.row`, `invoke("focus_session", { sessionId })`.
+   - When it returns false, play a short shake on that row via a CSS class.
+   - Rows get `cursor: pointer`.
+   - Tooltip gains "Click to open".
+4. **README:**
+   - A "Click to jump" note: it brings the session's *window* forward. For Windows Terminal that's the whole window, not the specific tab. For VS Code it's the VS Code window, not the terminal panel.
+   - Privacy: PIDs and process names are kept in memory only.
+
+**Decisions already made**
+- Window-level focus is good enough. Don't try to select a terminal tab or VS Code panel.
+- No new hook fields, no `$PPID` tricks.
+
+**Done when**
+- `cargo test -p traffic-light-core; echo EXIT=$?` gives EXIT=0, with a router test proving events still work without ConnectInfo. `cargo build -p traffic-light; echo EXIT=$?` gives EXIT=0. `cargo fmt --all -- --check; echo EXIT=$?` gives EXIT=0.
+- **Live check.** This machine has Claude Code sessions posting real hooks to port 7890, including the session you are running in, which is inside VS Code.
+  1. Quit the installed widget: `powershell -c "Stop-Process -Name traffic-light"`.
+  2. Run `cargo tauri dev` in the background, with a debug-only `eprintln!` that prints the resolved chain (`pid exe` list) and the window title chosen on click.
+  3. Trigger an event by running any tool, and confirm the log shows a chain ending in a process that owns the VS Code window.
+  4. Call the focus path once without the UI, through a `#[cfg(debug_assertions)]` startup env var `TL_FOCUS_TEST=<session_id>` that logs the chosen title, or a similar debug hook. Remove anything that isn't debug-gated.
+  5. Afterwards stop the dev app and restart the installed one: `powershell -c "Start-Process \"$env:LOCALAPPDATA\Traffic Light\traffic-light.exe\""`.
+- Report the exact chain you saw.
+
+**[owner] steps:** click a light for a Windows Terminal session and for a VS Code session, and confirm the right window comes forward.
