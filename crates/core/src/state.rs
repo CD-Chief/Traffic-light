@@ -50,6 +50,8 @@ pub struct Session {
     pub label: String,
     pub cwd: String,
     pub state: State,
+    /// Milliseconds since the Unix epoch. When `state` last changed value.
+    pub state_since: u64,
     /// Milliseconds since the Unix epoch.
     pub last_event_at: u64,
     pub last_tool: Option<String>,
@@ -189,6 +191,7 @@ impl Store {
                 label: label_for("", id),
                 cwd: String::new(),
                 state: State::Done,
+                state_since: now,
                 last_event_at: now,
                 last_tool: None,
                 stale: false,
@@ -275,6 +278,9 @@ impl Store {
             };
         }
 
+        if before.is_none() || s.state != target {
+            s.state_since = now;
+        }
         s.state = target;
         s.stale = false;
         s.last_event_at = now;
@@ -590,6 +596,39 @@ mod tests {
         st.apply(&tool("a", "PreToolUse", "AskUserQuestion", Some("")), 0);
         assert_eq!(state(&st, "a"), State::Working);
         assert!(st.sessions["a"].in_flight.is_empty());
+    }
+
+    fn since(st: &Store, id: &str) -> u64 {
+        st.sessions[id].state_since
+    }
+
+    #[test]
+    fn state_since_moves_only_on_a_real_change() {
+        let mut st = Store::new();
+        st.apply(&ev("a", "UserPromptSubmit"), 100);
+        assert_eq!(since(&st, "a"), 100);
+        st.apply(&tool("a", "PreToolUse", "Bash", Some("b1")), 200);
+        st.apply(&tool("a", "PreToolUse", "Bash", Some("b2")), 300);
+        assert_eq!(since(&st, "a"), 100);
+        assert_eq!(st.sessions["a"].last_event_at, 300);
+        st.apply(&ev("a", "PermissionRequest"), 400);
+        assert_eq!(since(&st, "a"), 400);
+        st.apply(&ev("a", "PermissionRequest"), 500);
+        assert_eq!(since(&st, "a"), 400);
+        st.apply(&ev("a", "Stop"), 600);
+        assert_eq!(since(&st, "a"), 600);
+    }
+
+    #[test]
+    fn stale_revival_in_same_state_keeps_state_since() {
+        let mut st = Store::new();
+        st.apply(&ev("a", "Stop"), 0);
+        assert!(st.sweep(STALE_AFTER_MS));
+        assert!(st.sessions["a"].stale);
+        assert_eq!(since(&st, "a"), 0);
+        st.apply(&ev("a", "Stop"), STALE_AFTER_MS + 5);
+        assert!(!st.sessions["a"].stale);
+        assert_eq!(since(&st, "a"), 0);
     }
 
     #[test]
