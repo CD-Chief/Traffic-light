@@ -58,6 +58,17 @@ function tooltip(s) {
   return lines.join("\n");
 }
 
+const DRAG_PX = 4;
+
+async function focusSession(id, row) {
+  let found = false;
+  try { found = await tauri.core.invoke("focus_session", { sessionId: id }); } catch {}
+  if (found) return;
+  row.classList.remove("shake");
+  void row.offsetWidth; // restart the animation
+  row.classList.add("shake");
+}
+
 function createRow() {
   const li = document.createElement("li");
   li.className = "row";
@@ -178,9 +189,26 @@ try { setTheme(localStorage.getItem("theme") || "classic"); } catch {}
 
 if (tauri) {
   // data-tauri-drag-region only fires for clicks on the element itself, not
-  // its children, so drag from anywhere on the widget by hand instead.
+  // its children, so drag from anywhere on the widget by hand. A press that
+  // never travels DRAG_PX is a click instead and jumps to the session.
+  let press = null;
   document.addEventListener("mousedown", (e) => {
-    if (e.button === 0) tauri.window.getCurrentWindow().startDragging();
+    if (e.button === 0) press = { x: e.clientX, y: e.clientY };
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!press || !(e.buttons & 1)) return;
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_PX) {
+      press = null;
+      tauri.window.getCurrentWindow().startDragging();
+    }
+  });
+  document.addEventListener("mouseup", (e) => {
+    const was = press;
+    press = null;
+    if (!was || e.button !== 0) return;
+    const row = e.target.closest?.(".row");
+    const id = row && [...rows].find(([, li]) => li === row)?.[0];
+    if (id) focusSession(id, row);
   });
   document.addEventListener("contextmenu", (e) => e.preventDefault());
   tauri.event.listen("sessions-updated", (e) => render(e.payload));

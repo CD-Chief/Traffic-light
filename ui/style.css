@@ -68,7 +68,9 @@ html, body {
   border-radius: 8px;
   transition: opacity .4s, filter .4s;
   animation: row-in .35s ease-out;
+  cursor: pointer;
 }
+.row.shake { animation: shake .3s ease-in-out; }
 .row[data-state="error"]     { --c: var(--red);   --slot: 0; }
 .row[data-state="needs_you"] { --c: var(--amber); --slot: 1; }
 .row[data-state="working"]   { --c: var(--green); --slot: 2; }
@@ -160,6 +162,10 @@ html, body {
   animation: halo 2.2s ease-out infinite;
 }
 
+@keyframes shake {
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
 @keyframes row-in { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes halo {
   0%   { opacity: .75; transform: scale(1); }
