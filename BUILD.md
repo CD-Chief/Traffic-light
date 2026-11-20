@@ -222,3 +222,36 @@ Windows only (`#[cfg(windows)]`). On other platforms the click does nothing and 
 - Report the exact chain you saw.
 
 **[owner] steps:** click a light for a Windows Terminal session and for a VS Code session, and confirm the right window comes forward.
+
+---
+
+## Stage 3: Border glow on state change
+
+### Card 5: A glow sweeps the border when a light changes
+
+Owner request (2026-11-20): when a state changes, a glow briefly travels along the border from one corner to the opposite one.
+
+**What to build** (`ui/style.css`, `ui/main.js` only)
+
+1. When any row's state changes (the place in `render` that already adds `.changed`), trigger a border sweep in the **new state's colour** (`--c` of that row, i.e. `var(--red|--amber|--green|--gray)`).
+   - **Panel themes** (classic, glass, signal, neon, terminal): the sweep runs on `#panel`'s border.
+   - **pills**: `#panel` has no visible border; the sweep runs on that row's own pill border.
+   - The sweep is a ring the same shape as the element (inherits `border-radius`), about 1.5px thick, drawn by a pseudo-element (`::after`) with a border-only mask (`mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;` plus padding equal to the ring width). The ring has no layout impact and `pointer-events: none`.
+   - The ring's fill is a diagonal band of light, transparent then colour then transparent, at 135deg, plus a soft outer glow if it can be done cheaply. It animates from the top-left corner to the bottom-right corner in about 900 ms ease-out, then fades out. Nothing is visible when idle.
+   - Several changes in a row restart the sweep with the latest colour. Don't queue them.
+2. Pass the colour from JS with a CSS custom property on the element that sweeps, e.g. `panel.style.setProperty("--sweep", color)`, and restart the animation by removing a class, forcing reflow (`void el.offsetWidth`), then re-adding it. The existing `.changed` trick in `render` shows the pattern. Read the colour with `getComputedStyle(row).getPropertyValue("--c")`.
+3. No sweep on first render, i.e. rows appearing for the first time or the initial `get_sessions`. Only real changes trigger one; the existing `if (li.dataset.state)` guard already marks that.
+4. Inside `@media (prefers-reduced-motion: reduce)` the sweep is disabled.
+5. Must not break the drag or click handling, `fitWindow`, the limits footer, or the existing per-theme `.changed` animations.
+6. Demo: the cycling demo triggers sweeps naturally. Add `?sweep=<state>&at=<0..1>` for screenshots: with `?static`, it shows the sweep frozen at that fraction of its animation (negative `animation-delay` plus `animation-play-state: paused`) in that state's colour.
+
+**Decisions already made**
+- CSS only, no canvas, no new files, no Rust changes.
+- One sweep element per theme as described. Not per row, except in pills.
+
+**Done when**
+- `cargo build -p traffic-light; echo EXIT=$?` gives EXIT=0. The UI is bundled, so this mostly proves nothing else broke.
+- Headless-Chrome screenshots, same command as Card 3 plus `--virtual-time-budget=3000`, with `?static&theme=<t>&sweep=needs_you&at=0.35` and `&at=0.7` for classic, glass and pills, and `at=0.5` for the other three. Save them to `C:\Users\chief\AppData\Local\Temp\claude\e7cf42f457511299\c37d3613-5d25-48da-b9b1-2f8348212f47\scratchpad\shots\glow\`. Look at every one: the ring must follow the rounded corners, sit exactly on the border, show the band moving diagonally between the two shots, and leave no artefact outside the widget's 8px margin.
+- A screenshot with no `sweep` param shows no ring.
+
+**[owner] steps:** watch it live and say if it's too subtle or too much.
