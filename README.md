@@ -103,6 +103,37 @@ Checked against the Claude Code hooks reference (Nov 2026):
   refused-connection delay with the widget closed ever bothers you, copy the
   `SessionStart` entry's `curl.exe` command hook to the other events.
 
+## Waiting timer
+
+A row that needs you shows how long it has been waiting after its name: nothing
+under a minute, then `1m`, `12m`, `1h 5m`. Hovering a row also says how long a
+waiting or working session has been in that state. It updates every 15 seconds.
+
+## Plan limits
+
+The widget footer shows your 5-hour and weekly plan usage (`5h 23%`, `wk 41%`,
+each with a thin bar: amber from 70%, red from 90%), and the tray tooltip adds
+a `Limits:` line. A window whose reset time has passed shows `0%`. The footer
+is hidden until limits are known, which they never are for API-key users:
+Claude Code only reports `rate_limits` to Pro, Max and Ultra subscribers, and
+only after a session's first API response.
+
+The numbers come from Claude Code's status line, which passes a JSON object to
+your status-line command on stdin. Add the one line from
+[`hooks/statusline-forward.sh`](hooks/statusline-forward.sh) to your
+status-line script (for example `~/.claude/statusline-command.sh`) right after
+it reads its input:
+
+```
+input=$(cat)
+printf '%s' "$input" | curl -s -m 1 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:7890/status >/dev/null 2>&1 &
+```
+
+It runs in the background and never delays the status line. If you set
+`TRAFFIC_LIGHT_TOKEN`, add `-H "X-Traffic-Light-Token: $TRAFFIC_LIGHT_TOKEN"`
+to that curl command. No polling is involved: the status line already runs on
+every assistant message.
+
 ## Designs
 
 Tray menu → **Design**. The choice is remembered.
@@ -135,6 +166,10 @@ which is rectangular and would need the panel reshaped to suit.
   rest is discarded during parsing and nothing is logged or written to disk.
 - `/event` always answers `200 {}`, even for garbage, so the widget is never
   the reason a hook errors.
+- `POST /status` (plan limits) reads only `rate_limits.five_hour` and
+  `rate_limits.seven_day` (`used_percentage` and `resets_at`) from the
+  status-line JSON. The rest (cwd, transcript path, model, cost) is discarded
+  during parsing, and the same `200 {}` and token rules apply as for `/event`.
 - Optional hardening: set the `TRAFFIC_LIGHT_TOKEN` environment variable
   before the widget starts and it will ignore events without a matching
   `X-Traffic-Light-Token` header. Add to each HTTP hook:
