@@ -25,7 +25,8 @@
   --amber: #ffb020;
   --red:   #ff453a;
   --gray:  #9aa0a6;
-  --margin: 8px;            /* room for the shadow at the top and sides of the transparent window */
+  --margin: 8px;            /* room for the shadow at the top (blur 10px - y-offset 4px = 6px) */
+  --margin-side: 10px;      /* the panel shadow's blur reaches 10px sideways */
   /* Room below the widget. Must be at least the largest bottom shadow extent
      (y-offset + blur: 4px + 10px = 14px for the panel themes), or the window
      clips the shadow. fitWindow reads this from #widget's margin-bottom. */
@@ -47,7 +48,7 @@ html, body {
 
 #widget {
   width: 220px;
-  margin: var(--margin) var(--margin) var(--margin-bottom);
+  margin: var(--margin) var(--margin-side) var(--margin-bottom);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -340,7 +341,7 @@ html[data-theme="pills"] .row {
   transition: opacity .4s, filter .4s, background-color .5s, border-color .5s;
 }
 /* No panel box: the strip sits in flow under the last pill, as wide as the pills. */
-html[data-theme="pills"] { --margin-bottom: 8px; } /* pill shadow reaches 2px + 6px */
+html[data-theme="pills"] { --margin-bottom: 8px; --margin-side: 8px; } /* pill shadow reaches 2px + 6px */
 html[data-theme="pills"] #limits { --strip-color: #fff; position: static; }
 html[data-theme="pills"] .lim-bar { box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
 html[data-theme="pills"] .dot { box-shadow: 0 0 7px color-mix(in srgb, var(--c) 65%, transparent); }
